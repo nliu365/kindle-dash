@@ -52,8 +52,12 @@ def fetch_events(now):
     if os.environ.get("SAMPLE_ICS"):
         sources.append(open(os.environ["SAMPLE_ICS"], "rb").read())
     for url in filter(None, (u.strip() for u in os.environ.get("ICAL_URL", "").split(","))):
-        if url.lower().startswith("webcal://"):
-            url = "https://" + url[len("webcal://"):]
+        url = url.strip().strip('"').strip("'").strip()
+        for prefix in ("webcal://", "webcals://"):
+            if url.lower().startswith(prefix):
+                url = "https://" + url[len(prefix):]
+        if not url.lower().startswith(("http://", "https://")):
+            raise ValueError("ICAL_URL must start with webcal:// or https://")
         r = requests.get(url, timeout=30, headers={"User-Agent": "kindle-dash/1.0"})
         r.raise_for_status()
         sources.append(r.content)
@@ -316,8 +320,11 @@ def render(now, events, wx, error=None):
         d.text((ax, fy + 30), "Off", font=font(26, True), fill=0)
     stamp = "Updated " + now.strftime("%-I:%M %p")
     if error:
-        stamp = "! " + error[:28]
-    d.text((ax, fy + 70), stamp, font=font(15), fill=90)
+        err = "! " + error
+        d.text((ax, fy + 64), err[:22], font=font(14), fill=0)
+        d.text((ax, fy + 82), err[22:44], font=font(14), fill=0)
+    else:
+        d.text((ax, fy + 70), stamp, font=font(15), fill=90)
 
     return img
 
