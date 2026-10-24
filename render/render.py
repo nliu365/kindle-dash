@@ -58,8 +58,18 @@ def fetch_events(now):
                 url = "https://" + url[len(prefix):]
         if not url.lower().startswith(("http://", "https://")):
             raise ValueError("ICAL_URL must start with webcal:// or https://")
-        r = requests.get(url, timeout=30, headers={"User-Agent": "kindle-dash/1.0"})
-        r.raise_for_status()
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            # Logs of public repos are public. GitHub only masks the secret as stored
+            # (webcal://...), so also mask the converted https:// form.
+            print(f"::add-mask::{url}")
+        try:
+            r = requests.get(url, timeout=30, headers={"User-Agent": "kindle-dash/1.0"})
+            r.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(f"calendar feed returned HTTP {e.response.status_code}") from None
+        except requests.RequestException as e:
+            # never include the URL (it grants read access to the calendar)
+            raise RuntimeError(f"calendar feed unreachable ({type(e).__name__})") from None
         sources.append(r.content)
 
     events = []

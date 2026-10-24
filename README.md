@@ -1,185 +1,291 @@
-# Kindle 4 (D01100) Calendar + Weather + Alarm Dashboard
+# kindle-dash
 
-Turns a Kindle 4 (firmware 4.1.2) into a wall or bedside display showing:
-- the date, current weather and today's high/low
+Turn an old **Kindle 4** (model D01100, the 2011 non-touch Kindle) into an always-on **calendar, weather and alarm dashboard**, using only free cloud services.
+
+<p align="center">
+  <img src="docs/preview.png" width="300" alt="Dashboard preview">
+  &nbsp;&nbsp;
+  <img src="docs/alarm-preview.png" width="300" alt="Alarm screen">
+</p>
+
+**What the screen shows:**
+- the date, current weather and today's high and low
 - a 12-hour forecast strip and a 3-day outlook
-- your Apple iCloud calendar for the next few days, with Chinese titles supported
-- your next alarm. At alarm time the screen flashes a full-screen **WAKE UP** card for 5 minutes.
+- the next few days of your **Apple iCloud** calendar. Chinese and other CJK titles work, and any standard `.ics` feed works too.
+- your next alarm. At alarm time the screen flashes a full-screen **WAKE UP** card.
 
-> **About the alarm:** the Kindle 4 has no speaker, so the alarm is visual only. Keep a phone alarm as backup if you need sound.
+**Switching modes needs no computer:**
+- **Dashboard → reader:** press any button.
+- **Reader → dashboard:** restart the Kindle.
 
-Everything runs on free tiers. There is nothing to keep running at home.
+> ⚠️ **The alarm is visual only.** The Kindle 4 has no speaker, so keep a phone alarm if you need sound.
 
-```
-GitHub Actions (every 15 min)          Cloudflare Worker (free)            Kindle 4
- pull iCloud Calendar + Open-Meteo  ──▶  stores dash.png in KV      ◀── plain HTTP ── wget every 15 min
- draw 600×800 grayscale PNG              answers /status: ALARM/OK  ◀── every 1 min
-```
-
-**Why the Cloudflare Worker?** The Kindle 4's downloader only speaks plain HTTP and old TLS. GitHub, Apple and most hosts now require modern HTTPS, so the Kindle can't reach them directly. The Worker serves the finished image over `http://`.
-
-**Privacy:** the GitHub repo can be public because it contains only code. Your calendar link and keys live in GitHub *Secrets*. The rendered image is only reachable at a URL containing your own secret KEY.
+Tested on a Kindle 4 (D01100) running firmware **4.1.2**.
 
 ---
 
-## Part A: Cloud setup (≈20 minutes, done on your computer)
+## How it works
+
+```
+Cloudflare Worker  ── Cron Trigger, every 15 min ──▶  GitHub Actions (render.yml)
+   ▲   │                                                 │ fetch iCloud .ics + Open-Meteo
+   │   │                                                 │ draw 600×800 grayscale PNG (Pillow)
+   │   └──────────── KV storage ◀──── upload ────────────┘
+   │
+   └── plain HTTP ── Kindle 4 (jailbroken): wget the image every 15 min, ask /status every minute
+```
+
+| Piece | Why it's there |
+|---|---|
+| **GitHub Actions** | Runs the Python renderer for free on public repos. Python and Pillow make the layout easy to change. |
+| **Cloudflare Worker + KV** | The Kindle's BusyBox `wget` (2013) only speaks **plain HTTP**. GitHub, Apple and most hosts require modern HTTPS, so the Worker serves the finished image over `http://` from KV storage. It also answers `/status` with `OK` or `ALARM`, so the Kindle never needs an accurate clock. |
+| **Worker Cron Trigger** | GitHub's own `schedule:` is best-effort and in practice skipped runs for hours at a time. The Worker starts the workflow through GitHub's API every 15 minutes instead. GitHub's schedule remains as an hourly backup. |
+| **Kindle scripts** | A small BusyBox shell loop draws the PNG with `eips`, flashes on alarm, and watches the buttons. |
+
+Repository layout:
+
+```
+render/      render.py: calendar + weather → dash.png / alarm.png
+.github/     render.yml: renders and uploads to Cloudflare KV
+worker/      worker.js: serves images and /status, triggers renders
+kindle/      scripts copied to the Kindle (/mnt/us/dashboard)
+docs/        preview images (sample data)
+```
+
+---
+
+## What you need
+
+- A Kindle 4 (D01100) on firmware 4.1.x, plus a **data-capable** micro-USB cable. Many cables are charge-only.
+- A Mac or Linux computer with `ssh` and `scp`. Windows works with WSL or OpenSSH.
+- Free accounts on **GitHub** and **Cloudflare**.
+- An **iCloud calendar** you can share, or any public `.ics` link.
+
+Allow about 20 minutes for the cloud side and 45 minutes for the Kindle.
+
+---
+
+## Part A: cloud setup
 
 ### A1. Get your iCloud calendar's share link
 Do this for each calendar you want on the dashboard.
 
-- **On iPhone or iPad:** open **Calendar**, then tap **Calendars** at the bottom. Tap the **ⓘ** next to the calendar and turn on **Public Calendar**. Tap **Share Link…** and copy it.
-- **On a Mac:** open **Calendar** and right-click the calendar in the sidebar (it must be under *iCloud*). Choose **Share Calendar…**, tick **Public Calendar**, and copy the URL.
+- **On iPhone or iPad:** open **Calendar**, then tap **Calendars**. Tap **ⓘ** next to the calendar, turn on **Public Calendar**, then tap **Share Link…** and copy it.
+- **On a Mac:** open **Calendar** and right-click the calendar (under *iCloud*). Choose **Share Calendar…**, tick **Public Calendar**, and copy the URL.
 - **On the web:** at icloud.com/calendar, click the share icon next to the calendar, tick **Public Calendar**, and copy the link.
 
-The link looks like `webcal://p123-caldav.icloud.com/published/2/MTIz…`. Paste it exactly as it is; the renderer converts `webcal://` to `https://` itself. To show several calendars, join the links with commas.
+The link looks like `webcal://p123-caldav.icloud.com/published/2/…`. Paste it exactly as given; the renderer converts `webcal://` to `https://`. For several calendars, join the links with commas.
 
-> **Privacy note:** "Public" means anyone who has this long random link can read the calendar. It isn't listed or searchable anywhere, and it lives only in your GitHub *Secrets*. To revoke it, turn **Public Calendar** off, then on again to get a new link. Calendars that are shared *with* you by someone else can't be published; ask the owner, or copy the events into one of your own calendars. Changes can take a few minutes to show up in the published feed.
+> **Privacy:** anyone with this long random link can read the calendar. It isn't searchable, and you only ever store it as a GitHub **Secret**. To revoke it, turn **Public Calendar** off and on again to get a new link.
 
-### A2. Create the Cloudflare Worker (free account at dash.cloudflare.com)
-1. **Storage & Databases → KV → Create namespace**, named `kindle-dash`. Copy its **Namespace ID**.
-2. **Workers & Pages → Create → Worker**, named `kindle-dash`, then **Deploy**. Click **Edit code**, replace everything with `worker/worker.js` from this kit, and **Deploy** again.
-3. In the Worker's **Settings**:
-   - **Bindings → Add → KV namespace:** variable name `DASH`, namespace `kindle-dash`.
-   - **Variables and Secrets:**
-     - `KEY` (type *Secret*): a random string you invent, like `k7Qp2xR9mZ`. This is your password-in-the-URL.
-     - `TZ_NAME` = `America/Los_Angeles`
-     - `ALARM_MINUTES` = `5`
-4. Note your Worker URL, e.g. `kindle-dash.yourname.workers.dev`.
-   Visit `http://kindle-dash.yourname.workers.dev/YOURKEY/status`. It should say `OK 16:45` (the image will say "not rendered yet" until A4).
+### A2. Create the Cloudflare Worker
+1. **Create the storage.** At dash.cloudflare.com, go to **Storage & Databases → Workers KV → Create**. Name it `kindle-dash` and note its **ID**.
+2. **Create the Worker.** Go to **Build → Compute → Workers & Pages → Create application → Start with Hello World!**, name it `kindle-dash`, and click **Deploy**. Don't choose "Upload static files"; that option is for websites, not code.
+3. **Add the code.** On the Worker's page, click **Edit code** at the top right. Replace everything with the contents of [`worker/worker.js`](worker/worker.js) and click **Deploy**.
+   *Tip:* `pbcopy < worker/worker.js` copies the file on a Mac. If the editor looks read-only, you're probably viewing an old version under **Deployments**; go back to the Worker's main page.
+4. **Connect the storage.** Go to **Settings → Bindings → Add → KV namespace**. Set the variable name to **`DASH`** (uppercase) and choose the namespace `kindle-dash`.
+5. **Add settings** under **Settings → Variables and Secrets**:
 
-   *(If you prefer the CLI instead: edit `worker/wrangler.toml`, then run `npx wrangler deploy` and `npx wrangler secret put KEY`.)*
+   | Name | Type | Value |
+   |---|---|---|
+   | `KEY` | Secret | a random string you invent, e.g. `k7Qp2xR9mZ`. It acts as the URL's password. |
+   | `TZ_NAME` | Text | e.g. `America/Los_Angeles` |
+   | `ALARM_MINUTES` | Text | `5` (how long the alarm flashes) |
 
-5. **Create an API token** (My Profile → API Tokens → Create Token → *Custom*):
-   - permission: Account → **Workers KV Storage → Edit**
-   - Copy the token. Also copy your **Account ID** from the right side of the Workers overview page.
+6. **Test it:** open `http://kindle-dash.<your-subdomain>.workers.dev/<KEY>/status`. It should say `OK 17:42`.
+   - `not found` means the KEY in the address is wrong or not set yet.
+   - `Setup error: KV binding missing` means step 4 isn't done.
 
-### A3. Put this kit on GitHub
-1. Create a new **public** repository (public repos get unlimited free Actions minutes) and upload this whole folder, including `.github/workflows/render.yml`.
+7. **Create a Cloudflare API token** for GitHub to upload with. Go to **My Profile → API Tokens → Create Token → Custom token** and give it **Account → Workers KV Storage → Edit**. Also note your **Account ID**, shown on the Workers & Pages overview.
+   To verify the token, run this on **one line**, with no trailing `\`:
+   `curl "https://api.cloudflare.com/client/v4/user/tokens/verify" -H "Authorization: Bearer YOUR_TOKEN"`
+
+*Prefer the command line?* Fill the KV ID into [`worker/wrangler.toml`](worker/wrangler.toml), then run `npx wrangler deploy` and `npx wrangler secret put KEY`. That also creates the binding and the Cron Trigger from A4.
+
+### A3. Put the code on GitHub
+1. Fork this repo, or push your own copy as a **public** repo. Public repos get unlimited free Actions minutes.
 2. In the repo, go to **Settings → Secrets and variables → Actions**.
 
    **Secrets:**
 
-   | name | value |
+   | Name | Value |
    |---|---|
-   | `ICAL_URL` | the iCloud link(s) from A1, comma-separated |
-   | `CF_API_TOKEN` | token from A2.5 |
-   | `CF_ACCOUNT_ID` | account ID from A2.5 |
-   | `CF_KV_NAMESPACE_ID` | namespace ID from A2.1 |
+   | `ICAL_URL` | iCloud link(s) from A1 |
+   | `CF_API_TOKEN` | token from A2.7 |
+   | `CF_ACCOUNT_ID` | account ID from A2.7 |
+   | `CF_KV_NAMESPACE_ID` | KV namespace ID from A2.1 |
 
    **Variables:**
 
-   | name | example | meaning |
+   | Name | Example | Meaning |
    |---|---|---|
-   | `ALARMS` | `06:45@1-5,08:30@6-7` | see *Alarm format* below |
-   | `LAT` / `LON` | `37.3688` / `-122.0363` | weather location (default Sunnyvale) |
+   | `ALARMS` | `06:45@1-5,08:30@6-7` | see [Alarm format](#alarm-format) |
+   | `LAT`, `LON` | `40.7128`, `-74.0060` | weather location; the default is Sunnyvale, CA |
    | `UNITS` | `imperial` | or `metric` |
+   | `TZ_NAME` | `America/Los_Angeles` | time zone for dates and times |
 
-### A3b. Make Cloudflare the 15-minute timer (recommended)
-GitHub's own schedule is best-effort and often skips runs, which leaves a stale date on the Kindle. The Worker can start the workflow instead.
-
-1. **Create a GitHub token:** github.com → Settings → Developer settings → **Fine-grained tokens** → Generate. Set **Repository access** to *Only select repositories* → `kindle-dash`, and **Permissions → Actions** to *Read and write*. Set an expiry and note when it is; the dashboard goes stale after that, so renew the token before then.
+### A4. Make the Worker the 15-minute timer
+1. **Create a GitHub fine-grained token.** On GitHub, go to **Settings → Developer settings → Fine-grained tokens → Generate**. Under **Repository access**, choose *Only select repositories* and pick your copy. Under **Permissions**, set **Actions** to *Read and write*. Set an expiry and **put a reminder in your calendar to renew it**.
 2. In the Worker's **Settings → Variables and Secrets**, add:
    - `GH_TOKEN` (type *Secret*): the token from step 1
    - `GH_REPO` (type *Text*): `your-username/kindle-dash`
 3. Under **Settings → Trigger Events → Add → Cron Triggers**, add `*/15 * * * *`.
-4. Paste the latest `worker/worker.js` into **Edit code** and **Deploy**.
-5. Check it worked: within 15 minutes, a run with the event **workflow_dispatch** should appear in GitHub's Actions tab without you clicking anything.
 
-### A4. First run
-1. Go to the **Actions** tab, choose **Render Kindle dashboard**, and click **Run workflow**. It should finish green in about a minute.
-2. Open `http://kindle-dash.yourname.workers.dev/YOURKEY/dash.png` in your browser. You should see your dashboard. ✅
-
-After this it re-renders by itself every 15 minutes, started by the Worker's Cron Trigger (A3b), with an hourly GitHub schedule as a backup.
-
-### Alarm format
-`HH:MM@days` entries, comma-separated, using 24-hour time. Days are numbered 1 = Monday through 7 = Sunday. Use ranges with `-` and separate pieces with `;`.
-- `06:45@1-5`: weekdays at 6:45
-- `08:30@6-7`: weekends at 8:30
-- `07:00`: every day
-- `06:00@1;3;5`: Mon, Wed and Fri
-
-To change alarms, edit the `ALARMS` variable. The change takes effect at the next render, within about 15 minutes.
+### A5. First run
+1. Go to **Actions → Render Kindle dashboard** and click **Run workflow**.
+   ⚠️ Use the **Run workflow** button, not **Re-run jobs** on an old run. A re-run replays the *old* commit's code.
+2. When the run turns green, open `http://kindle-dash.<subdomain>.workers.dev/<KEY>/dash.png`. You should see your dashboard, with *Updated …* in the footer.
+3. Within 15 minutes, a run with the event **workflow_dispatch** should appear by itself. That's the Worker's timer working.
 
 ---
 
-## Part B: Kindle setup (≈30 minutes)
+## Part B: Kindle setup
 
-> **Before you start:** connect the Kindle to Wi-Fi in its normal UI, and copy off any personal documents. The jailbreak doesn't erase books, but backups are cheap. The device should be at least 50% charged.
+> Charge the Kindle above 50% and connect it to Wi-Fi first. Copy off any personal documents to be safe.
 
-### B1. Jailbreak (Kindle 4 non-touch, works on 4.1.2)
-1. Download the **Kindle 4 NT jailbreak** (`kindle-jailbreak-k4-*.zip`, by Yifan Lu and NiLuJe). It is linked from the *Jailbreak* section of the MobileRead wiki page **Kindle4NTHacking** (wiki.mobileread.com/wiki/Kindle4NTHacking).
-2. Plug the Kindle in via USB. Copy these from the zip to the **root** of the Kindle drive:
-   - `data.tar.gz` (keep the `.gz`; some systems hide extensions)
+### B1. Jailbreak
+1. Download the **Kindle 4 NT jailbreak** (`kindle-jailbreak-k4-*.zip`). It's linked from the MobileRead wiki page [Kindle4NTHacking](https://wiki.mobileread.com/wiki/Kindle4NTHacking).
+2. Plug in the Kindle. It appears as a USB drive named **Kindle**; if it doesn't, try another cable. Copy these to the **top level** of the drive:
+   - `data.tar.gz` (check the full name with ⌘I, since Finder may hide `.gz`)
    - `ENABLE_DIAGS`
-   - the whole `diagnostic_logs` folder (including `device_info.xml`, which is needed to exit diagnostics mode later)
-3. Eject, unplug, then restart: **Menu → Settings → Menu → Restart**.
-4. It boots into a text menu called *Diagnostics*. Use the 5-way pad to pick **D) Exit, Reboot or Disable Diags**, then **R) Reboot System**, then **Q) To continue**.
-5. After about 20 seconds you'll see a jailbreak screen. Then it reboots into the normal UI with a new book: **"You are Jailbroken"**. ✅
+   - the whole `diagnostic_logs` folder
+3. Eject, then go to **Menu → Settings → Menu → Restart**. The Kindle boots into **TEQUILA – System Diags**.
+4. Choose **D) Exit, Reboot or Disable Diags → R) Reboot System → Q) To continue**, then wait.
+5. After a reboot, the book **"You are Jailbroken"** appears in your library. ✅ You can delete the three jailbreak files now.
+   - *Stuck in diags?* Choose **D → D) Disable Diagnostics → Q**.
 
-   *If it boots back into Diagnostics:* choose **D) Exit, Reboot or Disable Diags → D) Disable Diagnostics → Q**.
-
-### B2. Install USBNetwork, which gives you SSH over Wi-Fi
-This lets you start and stop the dashboard from your computer's terminal.
-1. From the same MobileRead *Kindle4NTHacking* page (or NiLuJe's "Kindle Hacks" thread), get **USBNetwork for the K4** and copy its `Update_usbnetwork_*_k4_install.bin` to the Kindle root.
-2. Run **Menu → Settings → Menu → Update Your Kindle**.
-3. On the Kindle drive, a new `usbnet/` folder appears:
-   - In `usbnet/etc/config`, set `USE_WIFI="true"` so SSH works over Wi-Fi.
-   - Put your computer's SSH public key (`~/.ssh/id_ed25519.pub`) into `usbnet/etc/authorized_keys`.
-   - Check the README inside that package for the exact option names in your version.
-4. Turn it on: on the Kindle home screen, press the keyboard key and type `;debugOn` and press Enter. Then type `~usbNetwork` and Enter, then `;debugOff` and Enter.
-5. Find the Kindle's IP in your router's device list, then run `ssh root@<kindle-ip>`.
+### B2. SSH over Wi-Fi (USBNetwork)
+1. From NiLuJe's *Kindle Hacks* thread on MobileRead, linked from the wiki page above, download **`kindle-usbnetwork-0.xx.N-k4.zip`** and read its `README_FIRST.txt`.
+2. Copy the `Update_usbnetwork_…_k4_install.bin` file to the drive, then go to **Menu → Settings → Menu → Update Your Kindle**.
+3. On the drive, edit `usbnet/etc/config` and set:
+   ```
+   K3_WIFI="true"
+   K3_WIFI_SSHD_ONLY="true"
+   ```
+   They're named after the Kindle 3, but they control Wi-Fi SSH on the Kindle 4 too.
+4. **Add an SSH key.** The SSH server is from about 2013, so use **RSA**; it won't accept newer key types:
+   ```sh
+   ssh-keygen -t rsa -b 2048 -f ~/.ssh/kindle_rsa -N ""
+   cp ~/.ssh/kindle_rsa.pub /Volumes/Kindle/usbnet/etc/authorized_keys
+   ```
+5. **Make it start at every boot:** `touch /Volumes/Kindle/usbnet/auto`. You can delete `DISABLED_auto`.
+   This is more reliable than typing `;debugOn` / `~usbNetwork` in the search box.
+   ⚠️ While USBNetwork is enabled, the USB cable becomes a network link instead of a drive, so copy files with `scp` from now on.
+6. Eject the Kindle and restart it.
+7. **Find its IP address.** The Kindle 4 doesn't show it, so look in your router's device list. Or match the Kindle's **Wi-Fi MAC**, shown under **Menu → Settings → Device Info**:
+   ```sh
+   ipconfig getifaddr en0                       # your Mac, e.g. 192.168.1.72
+   for i in $(seq 1 254); do ping -c1 -W 300 192.168.1.$i >/dev/null 2>&1 & done; wait
+   arp -a | grep -i f0:a2:25                    # start of the Kindle's MAC (Amazon prefix)
+   ```
+8. Add this to `~/.ssh/config`. Modern macOS refuses the old algorithms unless you allow them:
+   ```
+   Host kindle
+       HostName 192.168.1.108
+       User root
+       IdentityFile ~/.ssh/kindle_rsa
+       HostKeyAlgorithms +ssh-rsa
+       PubkeyAcceptedAlgorithms +ssh-rsa
+       KexAlgorithms +diffie-hellman-group14-sha1,diffie-hellman-group1-sha1
+   ```
+   Then run `ssh kindle`. You should get a `[root@kindle root]#` prompt. Make sure the Kindle is awake, because it turns Wi-Fi off when the screensaver comes on.
 
 ### B3. Install the dashboard
-1. Copy the `kindle/dashboard` folder from this kit to the **root** of the Kindle drive, so you have `/mnt/us/dashboard/`.
-2. In that folder, copy `config.example.sh` to `config.sh`. Edit `config.sh` and set `BASE` to your Worker URL **with `http://`** plus your KEY:
-   ```
-   BASE="http://kindle-dash.yourname.workers.dev/k7Qp2xR9mZ"
-   ```
-3. *(Optional)* If you have installed KUAL (Kindle Unified Application Launcher), also copy `kindle/extensions/dashboard` to `/mnt/us/extensions/` to get a **Start dashboard** button.
+On your computer:
+```sh
+cp kindle/dashboard/config.example.sh kindle/dashboard/config.sh
+# edit config.sh: BASE="http://kindle-dash.<subdomain>.workers.dev/<KEY>"   (http, not https)
+scp -O -r kindle/dashboard kindle:/mnt/us/
+```
+`-O` makes macOS use the legacy scp protocol that the Kindle understands. `config.sh` is git-ignored because it contains your KEY.
 
 ### B4. Start it
 ```sh
-ssh root@<kindle-ip> 'sh /mnt/us/dashboard/start.sh'
+ssh kindle
+wget -q -O - http://kindle-dash.<subdomain>.workers.dev/<KEY>/status   # should print: OK hh:mm
+sh /mnt/us/dashboard/start.sh                                          # prints: dashboard started (pid …)
 ```
-The reading UI disappears and the dashboard appears within about a minute. Leave the Kindle **plugged into USB power**: Wi-Fi stays on and sleep is disabled, so the battery lasts only about a day on its own. A low-battery warning appears below 15%.
+Plug the Kindle into a USB charger. In dashboard mode, Wi-Fi stays on and sleep is disabled, so on battery alone it lasts only about a day.
 
-### Switching without a computer (optional, recommended)
-Run this once over SSH:
+### B5. Switching without a computer
+Run this once:
 ```sh
 sh /mnt/us/dashboard/install-autostart.sh
 ```
-After that:
 
 | From → to | How |
 |---|---|
-| Dashboard → reader | press **any button** (5-way, Home, Menu, Back, page keys) |
+| Dashboard → reader | press **any button** |
 | Reader → dashboard | **Menu → Settings → Menu → Restart**; the dashboard appears about a minute after boot |
 
-- **Turn it off:** run `rm /mnt/us/dashboard/AUTOSTART` over SSH. The Kindle then boots normally.
-- **Remove it completely:** run `sh /mnt/us/dashboard/install-autostart.sh uninstall`.
+- **Turn it off:** `rm /mnt/us/dashboard/AUTOSTART`. The Kindle then boots normally.
+- **Remove it completely:** `sh /mnt/us/dashboard/install-autostart.sh uninstall`.
+- **Without autostart,** start it with `ssh kindle 'sh /mnt/us/dashboard/start.sh'`. To get back to reader mode, press a button, run `stop.sh`, or hold power for 20 seconds.
 
-### Getting your Kindle back
-- `ssh root@<kindle-ip> 'sh /mnt/us/dashboard/stop.sh'`, **or**
-- press any button on the Kindle, **or**
-- hold the power button about 20 seconds until it restarts. Unless you installed autostart, it comes back as a normal Kindle.
+The install adds `/etc/init.d/dashboard` and `/etc/rc5.d/S99dashboard`, using `mntroot rw` and then `mntroot ro`. A firmware update may remove them, in which case you simply reinstall.
 
 ---
 
-## Customising
-- **Layout:** `render/render.py` draws everything with Pillow. To preview locally without calendar or network access:
-  `pip install -r render/requirements.txt && SAMPLE_ICS=my.ics WX_FIXTURE=wx.json python render/render.py`.
-  Without `WX_FIXTURE` it calls Open-Meteo, which is free and needs no key.
-- **Refresh rate:** `REFRESH_MIN` in `kindle/dashboard/config.sh`, and the cron line in the workflow.
-- **Flash length:** `ALARM_MINUTES` on the Worker.
+## Everyday use
+
+### Alarm format
+The `ALARMS` GitHub variable holds `HH:MM@days` entries, comma-separated, in 24-hour time. Days are numbered 1 = Monday through 7 = Sunday. Use ranges with `-` and separate pieces with `;`.
+
+| Value | Meaning |
+|---|---|
+| `06:45@1-5` | weekdays at 6:45 |
+| `08:30@6-7` | weekends at 8:30 |
+| `07:00` | every day |
+| `06:00@1;3;5` | Mon, Wed and Fri |
+
+Changes take effect at the next render, within about 15 minutes. The screen flashes for `ALARM_MINUTES`, which is set on the Worker.
+
+### Customizing the layout
+Everything is drawn in [`render/render.py`](render/render.py) with Pillow. To preview offline:
+```sh
+pip install -r render/requirements.txt
+SAMPLE_ICS=my.ics WX_FIXTURE=wx.json OUT=out/dash.png python render/render.py
+```
+Leave out `WX_FIXTURE` to call Open-Meteo live. It's free and needs no key. The output must stay **600×800, 8-bit grayscale PNG** for `eips`.
+
+---
+
+## Kindle 4 firmware quirks (BusyBox 1.7.2)
+These are worth knowing if you change the shell scripts:
+- There's no `nohup` and no `setsid`. `loop.sh` ignores `SIGHUP` itself, so it survives SSH logout.
+- `wget` has **no `-T` timeout**. `loop.sh` uses a watchdog subshell instead.
+- `grep` has no `-E`. Use repeated `-e` patterns.
+- Buttons are `/dev/input/event0` (keypad), `event1` (5-way) and `event2`. A blocking `dd … bs=16 count=1` detects a press.
+- `/etc/init.d/framework stop` and `powerd stop` free the screen and prevent sleep, and Wi-Fi stays up.
 
 ## Troubleshooting
-| symptom | fix |
+
+| Symptom | Fix |
 |---|---|
-| Workflow fails at *Upload* | Check that the token has *Workers KV Storage: Edit* and that the account and namespace IDs are correct. |
-| Dashboard shows `! calendar: …` in the footer | The link is wrong, or Public Calendar was turned off or reset. Copy it again from the Calendar app. |
-| Kindle shows "No connection" | `ssh` in and run `wget -O - $BASE/status` (run `. /mnt/us/dashboard/config.sh` first). Make sure BASE starts with `http://`. Check `/tmp/dash/dash.log`. (The Kindle's BusyBox 1.7 `wget` has no timeout option, so don't add `-T`.) |
-| `http://…workers.dev` redirects to https | Cloudflare changed policy. Attach a cheap custom domain to the Worker and turn **Always Use HTTPS** *off* for it. |
-| Wi-Fi drops after start | Run `lipc-set-prop com.lab126.wifid enable 1` over SSH. The loop also retries this every failed refresh. |
-| Ghosting or faint leftovers | Normal on e-ink. Every refresh uses a full flash (`eips -f`), which clears most of it. |
-| Dashboard shows an old date or time | Check that the Worker's Cron Trigger is set and `GH_TOKEN` hasn't expired (A3b). Logs are under the Worker's **Observability** or **Logs** tab. |
-| GitHub schedule stopped | GitHub pauses idle repos after 60 days. The workflow makes a monthly keep-alive commit, and you can re-enable the workflow in the Actions tab. |
+| Kindle doesn't appear as a drive (green light only) | Use a data-capable cable and plug straight into the computer. If USBNetwork is enabled, there's no drive mode by design. |
+| Worker: **Error 1101** | The Worker crashed. Make sure `DASH` is bound (A2.4) and paste the latest `worker.js`, which reports setup errors in plain text. |
+| Footer shows `! calendar: …` | Check `ICAL_URL`, and whether Public Calendar was turned off or reset. Run a **new** workflow, not a re-run. |
+| Dashboard shows yesterday's date | The render timer isn't firing. Check the Worker's Cron Trigger and whether `GH_TOKEN` has expired (A4), then look in GitHub Actions for recent `workflow_dispatch` runs. |
+| Kindle shows "No connection – retrying" | Run `ssh kindle`, then `. /mnt/us/dashboard/config.sh; wget -q -O - $BASE/status`, and check `/tmp/dash/dash.log`. `BASE` must start with `http://`. |
+| `ssh kindle` hangs | The Kindle may be asleep, the IP may be wrong (use a real IP, not a placeholder), the Mac may be on a VPN, or you're on a guest network. |
+| `ssh` gives "Connection refused" | SSH isn't running. Check that `usbnet/auto` exists, then restart. |
+| `scp: unknown option -- O` | You ran scp *on the Kindle*. Run it on your computer. |
+| `http://…workers.dev` redirects to https | Cloudflare changed its policy. Attach a custom domain to the Worker and turn **Always Use HTTPS** off for it. |
+
+## Security and privacy
+- **What the repo contains:** code only. The calendar link, API tokens and Worker KEY live in GitHub Secrets, Cloudflare settings, or the git-ignored `config.sh`.
+- **Public workflow logs:** the renderer masks the calendar link in logs, including its converted `https://` form, and never prints it in errors.
+- **What protects the dashboard:** only the KEY in its URL, sent over **plain HTTP**, which the Kindle requires. Someone on your local network could see it. The exposure is a read-only image of your agenda, so pick a fresh KEY if you're worried, and don't reuse a password.
+- **What the tokens can do:** the Cloudflare token can only edit KV storage, and the GitHub token can only run Actions on this one repo.
+
+## Credits
+- **Kindle 4 jailbreak:** Yifan Lu, NiLuJe and ixtab. **USBNetwork:** NiLuJe. Both are from the [MobileRead](https://www.mobileread.com/forums/forumdisplay.php?f=150) community; this repo doesn't redistribute their files.
+- **Weather data:** [Open-Meteo](https://open-meteo.com/), licensed CC BY 4.0.
+- **Fonts:** Noto Sans CJK (SIL Open Font License), installed at render time and not bundled.
+- **Python libraries:** [icalendar](https://github.com/collective/icalendar), [recurring-ical-events](https://github.com/niccokunzmann/python-recurring-ical-events) and [Pillow](https://python-pillow.org/).
+
+## Disclaimer
+Jailbreaking modifies your device and may void its warranty. Follow these steps at your own risk. This project isn't affiliated with Amazon, Apple, GitHub or Cloudflare. "Kindle" and "iCloud" are trademarks of their respective owners.
+
+## License
+[MIT](LICENSE) © 2026 Ning Liu

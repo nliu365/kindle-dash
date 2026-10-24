@@ -8,10 +8,12 @@ keep_vars = true   # don't wipe variables set in the Cloudflare dashboard
 crons = ["*/15 * * * *"]   # asks GitHub to re-render the dashboard
 
 [vars]
-GH_REPO = "nliu365/kindle-dash"
 TZ_NAME = "America/Los_Angeles"
 ALARM_MINUTES = "5"
-# Secrets:  npx wrangler secret put KEY   and   npx wrangler secret put GH_TOKEN
+# Set these yourself (not stored in the repo):
+#   npx wrangler secret put KEY
+#   npx wrangler secret put GH_TOKEN
+#   GH_REPO ("your-username/kindle-dash") as a text variable in the Cloudflare dashboard
 
 [[kv_namespaces]]
 binding = "DASH"
