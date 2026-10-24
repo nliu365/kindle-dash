@@ -23,6 +23,21 @@ export default {
     }
     const name = parts[1];
 
+    // Clear setup errors instead of Cloudflare's generic "Error 1101"
+    if (!env.DASH || typeof env.DASH.get !== "function") {
+      return new Response(
+        "Setup error: KV binding missing. In the Worker go to Settings > Bindings > " +
+        "Add > KV namespace, variable name DASH (uppercase).\n", { status: 500 });
+    }
+    try {
+      return await handle(name, env);
+    } catch (e) {
+      return new Response("Worker error: " + (e && e.message ? e.message : e) + "\n", { status: 500 });
+    }
+  },
+};
+
+async function handle(name, env) {
     if (name === "dash.png" || name === "alarm.png") {
       const body = await env.DASH.get(name, "arrayBuffer");
       if (!body) return new Response("not rendered yet", { status: 503 });
@@ -45,8 +60,7 @@ export default {
     }
 
     return new Response("not found", { status: 404 });
-  },
-};
+}
 
 function pad(n) {
   return String(n).padStart(2, "0");
