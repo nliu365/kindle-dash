@@ -1,0 +1,24 @@
+# Secrets / local config
+kindle/dashboard/config.sh
+.dev.vars
+.env
+*.ics
+
+# Render output
+out/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Cloudflare / Node
+.wrangler/
+node_modules/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,5 @@
+{
+  "items": [
+    { "name": "Start calendar & weather dashboard", "priority": 1, "action": "/bin/sh", "params": "/mnt/us/dashboard/start.sh" }
+  ]
+}

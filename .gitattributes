@@ -1,0 +1,10 @@
+# Kindle runs these with BusyBox sh: Windows line endings would break them.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.yml  text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.xml  text eol=lf
+*.md   text eol=lf
+*.png  binary

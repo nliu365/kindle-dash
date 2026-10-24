@@ -1,0 +1,4 @@
+icalendar>=6
+recurring_ical_events>=3
+requests>=2.31
+Pillow>=10

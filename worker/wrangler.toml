@@ -1,0 +1,13 @@
+name = "kindle-dash"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+[vars]
+TZ_NAME = "America/Los_Angeles"
+ALARM_MINUTES = "5"
+# KEY is set as a secret:  npx wrangler secret put KEY
+
+[[kv_namespaces]]
+binding = "DASH"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
