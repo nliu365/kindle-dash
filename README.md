@@ -3,7 +3,7 @@
 Turns a Kindle 4 (firmware 4.1.2) into a wall or bedside display showing:
 - the date, current weather and today's high/low
 - a 12-hour forecast strip and a 3-day outlook
-- your Google Calendar for the next few days, with Chinese titles supported
+- your Apple iCloud calendar for the next few days, with Chinese titles supported
 - your next alarm. At alarm time the screen flashes a full-screen **WAKE UP** card for 5 minutes.
 
 > **About the alarm:** the Kindle 4 has no speaker, so the alarm is visual only. Keep a phone alarm as backup if you need sound.
@@ -12,11 +12,11 @@ Everything runs on free tiers. There is nothing to keep running at home.
 
 ```
 GitHub Actions (every 15 min)          Cloudflare Worker (free)            Kindle 4
- pull Google Calendar + Open-Meteo  ──▶  stores dash.png in KV      ◀── plain HTTP ── wget every 15 min
+ pull iCloud Calendar + Open-Meteo  ──▶  stores dash.png in KV      ◀── plain HTTP ── wget every 15 min
  draw 600×800 grayscale PNG              answers /status: ALARM/OK  ◀── every 1 min
 ```
 
-**Why the Cloudflare Worker?** The Kindle 4's downloader only speaks plain HTTP and old TLS. GitHub, Google and most hosts now require modern HTTPS, so the Kindle can't reach them directly. The Worker serves the finished image over `http://`.
+**Why the Cloudflare Worker?** The Kindle 4's downloader only speaks plain HTTP and old TLS. GitHub, Apple and most hosts now require modern HTTPS, so the Kindle can't reach them directly. The Worker serves the finished image over `http://`.
 
 **Privacy:** the GitHub repo can be public because it contains only code. Your calendar link and keys live in GitHub *Secrets*. The rendered image is only reachable at a URL containing your own secret KEY.
 
@@ -24,10 +24,16 @@ GitHub Actions (every 15 min)          Cloudflare Worker (free)            Kindl
 
 ## Part A: Cloud setup (≈20 minutes, done on your computer)
 
-### A1. Get your Google Calendar's private iCal link
-1. Open Google Calendar on the web. Click ⚙ → **Settings**, then pick your calendar on the left under *Settings for my calendars*.
-2. Scroll to **Integrate calendar** and copy **Secret address in iCal format** (ends in `basic.ics`).
-3. To show several calendars, collect each link and join them with commas later.
+### A1. Get your iCloud calendar's share link
+Do this for each calendar you want on the dashboard.
+
+- **On iPhone or iPad:** open **Calendar**, then tap **Calendars** at the bottom. Tap the **ⓘ** next to the calendar and turn on **Public Calendar**. Tap **Share Link…** and copy it.
+- **On a Mac:** open **Calendar** and right-click the calendar in the sidebar (it must be under *iCloud*). Choose **Share Calendar…**, tick **Public Calendar**, and copy the URL.
+- **On the web:** at icloud.com/calendar, click the share icon next to the calendar, tick **Public Calendar**, and copy the link.
+
+The link looks like `webcal://p123-caldav.icloud.com/published/2/MTIz…`. Paste it exactly as it is; the renderer converts `webcal://` to `https://` itself. To show several calendars, join the links with commas.
+
+> **Privacy note:** "Public" means anyone who has this long random link can read the calendar. It isn't listed or searchable anywhere, and it lives only in your GitHub *Secrets*. To revoke it, turn **Public Calendar** off, then on again to get a new link. Calendars that are shared *with* you by someone else can't be published; ask the owner, or copy the events into one of your own calendars. Changes can take a few minutes to show up in the published feed.
 
 ### A2. Create the Cloudflare Worker (free account at dash.cloudflare.com)
 1. **Storage & Databases → KV → Create namespace**, named `kindle-dash`. Copy its **Namespace ID**.
@@ -55,7 +61,7 @@ GitHub Actions (every 15 min)          Cloudflare Worker (free)            Kindl
 
    | name | value |
    |---|---|
-   | `ICAL_URL` | the Google link(s) from A1, comma-separated |
+   | `ICAL_URL` | the iCloud link(s) from A1, comma-separated |
    | `CF_API_TOKEN` | token from A2.5 |
    | `CF_ACCOUNT_ID` | account ID from A2.5 |
    | `CF_KV_NAMESPACE_ID` | namespace ID from A2.1 |
@@ -143,7 +149,7 @@ The reading UI disappears and the dashboard appears within about a minute. Leave
 | symptom | fix |
 |---|---|
 | Workflow fails at *Upload* | Check that the token has *Workers KV Storage: Edit* and that the account and namespace IDs are correct. |
-| Dashboard shows `! calendar: …` in the footer | The iCal link is wrong or was reset. Copy it again from Google. |
+| Dashboard shows `! calendar: …` in the footer | The link is wrong, or Public Calendar was turned off or reset. Copy it again from the Calendar app. |
 | Kindle shows "No connection" | `ssh` in and run `wget -O - $BASE/status` (run `. /mnt/us/dashboard/config.sh` first). Make sure BASE starts with `http://`. Check `/tmp/dash/dash.log`. |
 | `http://…workers.dev` redirects to https | Cloudflare changed policy. Attach a cheap custom domain to the Worker and turn **Always Use HTTPS** *off* for it. |
 | Wi-Fi drops after start | Run `lipc-set-prop com.lab126.wifid enable 1` over SSH. The loop also retries this every failed refresh. |

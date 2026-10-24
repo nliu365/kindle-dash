@@ -2,7 +2,8 @@
 """Render a 600x800 grayscale dashboard PNG for a Kindle 4.
 
 Inputs (environment variables):
-  ICAL_URL   Google Calendar "Secret address in iCal format" (one or more, comma-separated)
+  ICAL_URL   Apple iCloud "Public Calendar" link(s), comma-separated. webcal:// links are
+             accepted as-is (converted to https://). Any standard .ics URL also works.
   LAT, LON   Weather location (default: Sunnyvale, CA)
   TZ_NAME    IANA time zone (default: America/Los_Angeles)
   UNITS      "imperial" (default) or "metric"
@@ -51,7 +52,9 @@ def fetch_events(now):
     if os.environ.get("SAMPLE_ICS"):
         sources.append(open(os.environ["SAMPLE_ICS"], "rb").read())
     for url in filter(None, (u.strip() for u in os.environ.get("ICAL_URL", "").split(","))):
-        r = requests.get(url, timeout=30)
+        if url.lower().startswith("webcal://"):
+            url = "https://" + url[len("webcal://"):]
+        r = requests.get(url, timeout=30, headers={"User-Agent": "kindle-dash/1.0"})
         r.raise_for_status()
         sources.append(r.content)
 
