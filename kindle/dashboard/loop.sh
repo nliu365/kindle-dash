@@ -9,9 +9,21 @@ echo $$ > "$TMP/loop.pid"
 
 log() { echo "$(date '+%F %T') $*" >> "$TMP/dash.log"; }
 
+# BusyBox 1.7 wget has no timeout option, so a watchdog kills a stalled download.
+dl() {  # dl URL OUTFILE SECONDS
+    wget -q -O "$2" "$1" &
+    wpid=$!
+    ( sleep "$3"; kill "$wpid" 2>/dev/null ) &
+    dogpid=$!
+    wait "$wpid"
+    rc=$?
+    kill "$dogpid" 2>/dev/null
+    return $rc
+}
+
 fetch() {  # fetch NAME -> $TMP/NAME, only replaces the old copy on success
     rm -f "$TMP/$1.part"
-    if wget -q -T 20 -O "$TMP/$1.part" "$BASE/$1" && [ -s "$TMP/$1.part" ]; then
+    if dl "$BASE/$1" "$TMP/$1.part" 30 && [ -s "$TMP/$1.part" ]; then
         mv "$TMP/$1.part" "$TMP/$1"
         return 0
     fi
@@ -51,7 +63,9 @@ while true; do
     fi
 
     # 2) Ask the server whether an alarm is ringing right now
-    status=$(wget -q -T 15 -O - "$BASE/status" 2>/dev/null)
+    rm -f "$TMP/status"
+    dl "$BASE/status" "$TMP/status" 15
+    status=$(cat "$TMP/status" 2>/dev/null)
     case "$status" in
         ALARM*)
             log "alarm: $status"

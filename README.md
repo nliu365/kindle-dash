@@ -150,7 +150,7 @@ The reading UI disappears and the dashboard appears within about a minute. Leave
 |---|---|
 | Workflow fails at *Upload* | Check that the token has *Workers KV Storage: Edit* and that the account and namespace IDs are correct. |
 | Dashboard shows `! calendar: …` in the footer | The link is wrong, or Public Calendar was turned off or reset. Copy it again from the Calendar app. |
-| Kindle shows "No connection" | `ssh` in and run `wget -O - $BASE/status` (run `. /mnt/us/dashboard/config.sh` first). Make sure BASE starts with `http://`. Check `/tmp/dash/dash.log`. |
+| Kindle shows "No connection" | `ssh` in and run `wget -O - $BASE/status` (run `. /mnt/us/dashboard/config.sh` first). Make sure BASE starts with `http://`. Check `/tmp/dash/dash.log`. (The Kindle's BusyBox 1.7 `wget` has no timeout option, so don't add `-T`.) |
 | `http://…workers.dev` redirects to https | Cloudflare changed policy. Attach a cheap custom domain to the Worker and turn **Always Use HTTPS** *off* for it. |
 | Wi-Fi drops after start | Run `lipc-set-prop com.lab126.wifid enable 1` over SSH. The loop also retries this every failed refresh. |
 | Ghosting or faint leftovers | Normal on e-ink. Every refresh uses a full flash (`eips -f`), which clears most of it. |
