@@ -3,10 +3,14 @@ main = "worker.js"
 compatibility_date = "2026-10-01"
 workers_dev = true
 
+[triggers]
+crons = ["*/15 * * * *"]   # asks GitHub to re-render the dashboard
+
 [vars]
+GH_REPO = "nliu365/kindle-dash"
 TZ_NAME = "America/Los_Angeles"
 ALARM_MINUTES = "5"
-# KEY is set as a secret:  npx wrangler secret put KEY
+# Secrets:  npx wrangler secret put KEY   and   npx wrangler secret put GH_TOKEN
 
 [[kv_namespaces]]
 binding = "DASH"

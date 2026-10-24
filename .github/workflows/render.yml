@@ -1,9 +1,11 @@
 name: Render Kindle dashboard
 
 on:
+  # Main timer: the Cloudflare Worker's Cron Trigger calls workflow_dispatch every
+  # 15 min. GitHub's own schedule is best-effort, so it is only an hourly backup.
   schedule:
-    - cron: "*/15 * * * *"   # every 15 minutes (GitHub may run it a few minutes late)
-  workflow_dispatch:          # "Run workflow" button for testing
+    - cron: "7 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write             # only used by the monthly keep-alive commit below
@@ -61,7 +63,7 @@ jobs:
       - name: Monthly keep-alive
         if: github.event_name == 'schedule'
         run: |
-          if [ "$(date -u +%d%H)" = "0100" ] && [ "$(date -u +%M)" -lt 15 ]; then
+          if [ "$(date -u +%d%H)" = "0100" ]; then
             git config user.name  "kindle-dash bot"
             git config user.email "actions@users.noreply.github.com"
             git commit --allow-empty -m "keep-alive $(date -u +%F)"

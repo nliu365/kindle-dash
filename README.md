@@ -74,11 +74,22 @@ The link looks like `webcal://p123-caldav.icloud.com/published/2/MTIz…`. Paste
    | `LAT` / `LON` | `37.3688` / `-122.0363` | weather location (default Sunnyvale) |
    | `UNITS` | `imperial` | or `metric` |
 
+### A3b. Make Cloudflare the 15-minute timer (recommended)
+GitHub's own schedule is best-effort and often skips runs, which leaves a stale date on the Kindle. The Worker can start the workflow instead.
+
+1. **Create a GitHub token:** github.com → Settings → Developer settings → **Fine-grained tokens** → Generate. Set **Repository access** to *Only select repositories* → `kindle-dash`, and **Permissions → Actions** to *Read and write*. Set an expiry and note when it is; the dashboard goes stale after that, so renew the token before then.
+2. In the Worker's **Settings → Variables and Secrets**, add:
+   - `GH_TOKEN` (type *Secret*): the token from step 1
+   - `GH_REPO` (type *Text*): `your-username/kindle-dash`
+3. Under **Settings → Trigger Events → Add → Cron Triggers**, add `*/15 * * * *`.
+4. Paste the latest `worker/worker.js` into **Edit code** and **Deploy**.
+5. Check it worked: within 15 minutes, a run with the event **workflow_dispatch** should appear in GitHub's Actions tab without you clicking anything.
+
 ### A4. First run
 1. Go to the **Actions** tab, choose **Render Kindle dashboard**, and click **Run workflow**. It should finish green in about a minute.
 2. Open `http://kindle-dash.yourname.workers.dev/YOURKEY/dash.png` in your browser. You should see your dashboard. ✅
 
-After this it re-renders by itself every 15 minutes.
+After this it re-renders by itself every 15 minutes, started by the Worker's Cron Trigger (A3b), with an hourly GitHub schedule as a backup.
 
 ### Alarm format
 `HH:MM@days` entries, comma-separated, using 24-hour time. Days are numbered 1 = Monday through 7 = Sunday. Use ranges with `-` and separate pieces with `;`.
@@ -154,4 +165,5 @@ The reading UI disappears and the dashboard appears within about a minute. Leave
 | `http://…workers.dev` redirects to https | Cloudflare changed policy. Attach a cheap custom domain to the Worker and turn **Always Use HTTPS** *off* for it. |
 | Wi-Fi drops after start | Run `lipc-set-prop com.lab126.wifid enable 1` over SSH. The loop also retries this every failed refresh. |
 | Ghosting or faint leftovers | Normal on e-ink. Every refresh uses a full flash (`eips -f`), which clears most of it. |
+| Dashboard shows an old date or time | Check that the Worker's Cron Trigger is set and `GH_TOKEN` hasn't expired (A3b). Logs are under the Worker's **Observability** or **Logs** tab. |
 | GitHub schedule stopped | GitHub pauses idle repos after 60 days. The workflow makes a monthly keep-alive commit, and you can re-enable the workflow in the Actions tab. |

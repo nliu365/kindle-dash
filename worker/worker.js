@@ -11,10 +11,18 @@
 //   KEY           secret path segment
 //   TZ_NAME       e.g. America/Los_Angeles
 //   ALARM_MINUTES how long the alarm keeps flashing (default 5)
+//   GH_TOKEN      (secret) GitHub fine-grained token, Actions: Read and write
+//   GH_REPO       e.g. nliu365/kindle-dash
+// A Cron Trigger (every 15 min) asks GitHub to run the render workflow, because
+// GitHub's own schedule is best-effort and often skips runs.
 // Alarm times come from KV key "alarms" (uploaded by the workflow from the
 // ALARMS repo variable) so you only edit them in one place.
 
 export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(triggerRender(env));
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
@@ -96,4 +104,24 @@ function isRinging(a, now, window) {
   let day = now.dow;
   if (diff < 0) { diff += 1440; day = day === 1 ? 7 : day - 1; } // alarm near midnight
   return diff >= 0 && diff < window && a.allowed.has(day);
+}
+
+async function triggerRender(env) {
+  if (!env.GH_TOKEN || !env.GH_REPO) {
+    console.log("GH_TOKEN / GH_REPO not set; skipping render trigger");
+    return;
+  }
+  const url = `https://api.github.com/repos/${env.GH_REPO}/actions/workflows/render.yml/dispatches`;
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.GH_TOKEN}`,
+      accept: "application/vnd.github+json",
+      "x-github-api-version": "2022-11-28",
+      "user-agent": "kindle-dash-worker",   // GitHub rejects requests without one
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ ref: "main" }),
+  });
+  if (r.status !== 204) console.log("render trigger failed", r.status, await r.text());
 }
