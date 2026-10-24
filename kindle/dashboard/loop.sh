@@ -1,5 +1,6 @@
 #!/bin/sh
 # Main loop that runs on the Kindle 4 (BusyBox shell). Started by start.sh.
+trap '' HUP          # keep running after the SSH session that started us closes
 DIR=/mnt/us/dashboard
 . "$DIR/config.sh"
 TMP=/tmp/dash
