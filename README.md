@@ -143,9 +143,25 @@ ssh root@<kindle-ip> 'sh /mnt/us/dashboard/start.sh'
 ```
 The reading UI disappears and the dashboard appears within about a minute. Leave the Kindle **plugged into USB power**: Wi-Fi stays on and sleep is disabled, so the battery lasts only about a day on its own. A low-battery warning appears below 15%.
 
+### Switching without a computer (optional, recommended)
+Run this once over SSH:
+```sh
+sh /mnt/us/dashboard/install-autostart.sh
+```
+After that:
+
+| From → to | How |
+|---|---|
+| Dashboard → reader | press **any button** (5-way, Home, Menu, Back, page keys) |
+| Reader → dashboard | **Menu → Settings → Menu → Restart**; the dashboard appears about a minute after boot |
+
+- **Turn it off:** run `rm /mnt/us/dashboard/AUTOSTART` over SSH. The Kindle then boots normally.
+- **Remove it completely:** run `sh /mnt/us/dashboard/install-autostart.sh uninstall`.
+
 ### Getting your Kindle back
 - `ssh root@<kindle-ip> 'sh /mnt/us/dashboard/stop.sh'`, **or**
-- hold the power button about 20 seconds until it restarts. The dashboard does not auto-start, so it comes back as a normal Kindle.
+- press any button on the Kindle, **or**
+- hold the power button about 20 seconds until it restarts. Unless you installed autostart, it comes back as a normal Kindle.
 
 ---
 

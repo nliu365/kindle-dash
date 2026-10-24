@@ -9,6 +9,33 @@ echo $$ > "$TMP/loop.pid"
 
 log() { echo "$(date '+%F %T') $*" >> "$TMP/dash.log"; }
 
+# --- Press any button to go back to reader mode -----------------------------
+# One blocking dd per input device (keypad, 5-way, side keys). Whichever gets an
+# event first drops a flag file; the loop checks it every second.
+arm_buttons() {
+    rm -f "$TMP/pressed" "$TMP/watch.pids"
+    for ev in /dev/input/event*; do
+        [ -c "$ev" ] || continue
+        ( dd if="$ev" of=/dev/null bs=16 count=1 2>/dev/null; touch "$TMP/pressed" ) &
+        echo $! >> "$TMP/watch.pids"
+    done
+}
+
+exit_to_reader() {
+    log "button pressed - returning to reader mode"
+    rm -f "$TMP/loop.pid"                  # so stop.sh doesn't kill this process
+    exec sh "$DIR/stop.sh" button
+}
+
+nap() {  # sleep N seconds, but react to a button press within ~1 s
+    n=$1
+    while [ "$n" -gt 0 ]; do
+        [ -f "$TMP/pressed" ] && exit_to_reader
+        sleep 1
+        n=$((n - 1))
+    done
+}
+
 # BusyBox 1.7 wget has no timeout option, so a watchdog kills a stalled download.
 dl() {  # dl URL OUTFILE SECONDS
     wget -q -O "$2" "$1" &
@@ -45,6 +72,8 @@ battery_note() {
 minutes=$REFRESH_MIN    # force a refresh on the first pass
 fails=0
 wifi_up
+sleep 3                 # let any key press that launched us settle
+arm_buttons
 
 while true; do
     # 1) Refresh the dashboard image
@@ -73,14 +102,14 @@ while true; do
             i=0
             while [ $i -lt 11 ]; do
                 [ -f "$TMP/alarm.png" ] && show "$TMP/alarm.png" || eips -c > /dev/null 2>&1
-                sleep 2
+                nap 2
                 [ -f "$TMP/dash.png" ] && show "$TMP/dash.png"
-                sleep 3
+                nap 3
                 i=$((i + 1))
             done
             ;;
         *)
-            sleep 60
+            nap 60
             ;;
     esac
     minutes=$((minutes + 1))
