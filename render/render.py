@@ -73,8 +73,10 @@ def fetch_events(now):
         sources.append(r.content)
 
     events = []
+    total = 0
     for raw in sources:
         cal = Calendar.from_ical(raw)
+        total += len(cal.walk("VEVENT"))
         for ev in recurring_ical_events.of(cal).between(start, end):
             s = ev.get("DTSTART").dt
             e = ev.get("DTEND").dt if ev.get("DTEND") else s
@@ -92,6 +94,9 @@ def fetch_events(now):
                 "start": s, "end": e, "all_day": all_day,
             })
     events.sort(key=lambda x: (x["start"].date(), not x["all_day"], x["start"]))
+    # Counts only: titles and feed URLs are private, and public repos have public logs.
+    print(f"calendar: {len(events)} upcoming event(s) of {total} in {len(sources)} feed(s), "
+          f"{start:%b %-d}-{end - dt.timedelta(days=1):%b %-d}")
     return events
 
 
